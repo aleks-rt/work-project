@@ -33,7 +33,7 @@ class _CallbackHandler(BaseHTTPRequestHandler):
             _CallbackHandler.code = params["code"][0]
             self.send_response(200)
             self.end_headers()
-            self.wfile.write(b"<h2>Авторизация успешна! Можно закрыть вкладку.</h2>")
+            self.wfile.write("<h2>Avtorizatsiya uspeshna! Mozhno zakryt vkladku.</h2>".encode())
         else:
             self.send_response(400)
             self.end_headers()
