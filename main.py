@@ -32,6 +32,16 @@ logging.basicConfig(
 logger = logging.getLogger("main")
 
 
+BA_KEYWORDS = [
+    "бизнес-аналитик", "бизнес аналитик", "business analyst", "бизнес-анализ",
+]
+
+
+def is_ba_job(title: str) -> bool:
+    t = title.lower()
+    return any(kw in t for kw in BA_KEYWORDS)
+
+
 def check_jobs():
     logger.info("Запуск проверки вакансий (ключевые слова: %s)", SEARCH_KEYWORDS)
     new_count = 0
@@ -41,7 +51,8 @@ def check_jobs():
         logger.info("Источник: %s", scraper.SOURCE_NAME)
         try:
             jobs = scraper.fetch(SEARCH_KEYWORDS)
-            logger.info("  Найдено: %d вакансий", len(jobs))
+            jobs = [j for j in jobs if is_ba_job(j.title)]
+            logger.info("  Найдено: %d вакансий BA", len(jobs))
             for job in jobs:
                 if not is_seen(job.id):
                     mark_seen(job.id, job.source, job.title, job.company, job.url)
