@@ -129,6 +129,18 @@ def make_keyboard(job: Job) -> InlineKeyboardMarkup:
     ]])
 
 
+def _run_async(coro):
+    try:
+        loop = asyncio.get_event_loop()
+        if loop.is_closed():
+            raise RuntimeError
+        return loop.run_until_complete(coro)
+    except RuntimeError:
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+        return loop.run_until_complete(coro)
+
+
 def send_job_sync(job: Job):
     async def _send():
         app = build_app()
@@ -138,14 +150,14 @@ def send_job_sync(job: Job):
             parse_mode=ParseMode.HTML,
             reply_markup=make_keyboard(job),
         )
-    asyncio.run(_send())
+    _run_async(_send())
 
 
 def send_text_sync(text: str):
     async def _send():
         app = build_app()
         await app.bot.send_message(chat_id=TELEGRAM_CHAT_ID, text=text, parse_mode=ParseMode.HTML)
-    asyncio.run(_send())
+    _run_async(_send())
 
 
 def run_bot():
