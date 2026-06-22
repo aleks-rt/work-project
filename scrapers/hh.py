@@ -52,7 +52,6 @@ class HHScraper(BaseScraper):
     def _fetch_keyword(self, keyword: str) -> list[Job]:
         params = {
             "text": keyword,
-            "search_field": "name",
             "area": HH_AREA,
             "per_page": 50,
             "order_by": "publication_time",
