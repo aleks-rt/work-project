@@ -1,88 +1,82 @@
 import logging
-import time
-import requests
-from config import EXPERIENCE, MIN_SALARY
+import hashlib
+from playwright.sync_api import sync_playwright, TimeoutError as PWTimeout
 from .base import BaseScraper, Job
 
 logger = logging.getLogger(__name__)
-
-HH_API = "https://api.hh.ru/vacancies"
-
-# 113 = вся Россия, 1 = Москва, 2 = Санкт-Петербург
-HH_AREA = "113"
-
-HEADERS = {
-    "User-Agent": (
-        "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
-        "AppleWebKit/537.36 (KHTML, like Gecko) "
-        "Chrome/120.0.0.0 Safari/537.36"
-    ),
-    "Accept": "application/json",
-}
-
-
-def _salary_str(salary: dict | None) -> str | None:
-    if not salary:
-        return None
-    parts = []
-    if salary.get("from"):
-        parts.append(f"от {salary['from']:,}")
-    if salary.get("to"):
-        parts.append(f"до {salary['to']:,}")
-    currency = salary.get("currency", "")
-    if currency == "RUR":
-        currency = "₽"
-    return " ".join(parts) + f" {currency}".strip() if parts else None
 
 
 class HHScraper(BaseScraper):
     SOURCE_NAME = "hh.ru"
 
-    def fetch(self, keywords: list[str]) -> list[Job]:
-        jobs: list[Job] = []
-        seen: set[str] = set()
-        for keyword in keywords:
-            try:
-                for job in self._fetch_keyword(keyword):
-                    if job.id not in seen:
-                        seen.add(job.id)
-                        jobs.append(job)
-                time.sleep(0.5)
-            except Exception as e:
-                logger.error("hh.ru error for '%s': %s", keyword, e)
+    def fetch(self, keywords: list) -> list:
+        jobs = []
+        seen = set()
+        with sync_playwright() as p:
+            browser = p.chromium.launch(headless=True)
+            ctx = browser.new_context(
+                user_agent=(
+                    "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
+                    "AppleWebKit/537.36 (KHTML, like Gecko) "
+                    "Chrome/120.0.0.0 Safari/537.36"
+                ),
+                locale="ru-RU",
+            )
+            page = ctx.new_page()
+            for keyword in keywords:
+                try:
+                    for job in self._fetch_keyword(page, keyword):
+                        if job.id not in seen:
+                            seen.add(job.id)
+                            jobs.append(job)
+                except Exception as e:
+                    logger.error("hh.ru error for '%s': %s", keyword, e)
+            browser.close()
         return jobs
 
-    def _fetch_keyword(self, keyword: str) -> list[Job]:
-        params = {
-            "text": keyword,
-            "area": HH_AREA,
-            "per_page": 50,
-            "order_by": "publication_time",
-        }
-        if MIN_SALARY:
-            params["salary"] = MIN_SALARY
-            params["only_with_salary"] = "true"
-        if EXPERIENCE:
-            params["experience"] = EXPERIENCE
+    def _fetch_keyword(self, page, keyword: str) -> list:
+        url = (
+            f"https://hh.ru/search/vacancy"
+            f"?text={keyword.replace(' ', '+')}"
+            f"&area=113&order_by=publication_time&search_period=1"
+        )
+        page.goto(url, timeout=30000, wait_until="domcontentloaded")
+        try:
+            page.wait_for_selector("[data-qa='vacancy-serp__vacancy']", timeout=10000)
+        except PWTimeout:
+            logger.warning("hh.ru: вакансии не найдены для '%s'", keyword)
+            return []
 
-        resp = requests.get(HH_API, params=params, headers=HEADERS, timeout=15)
-        resp.raise_for_status()
-        data = resp.json()
-
+        cards = page.query_selector_all("[data-qa='vacancy-serp__vacancy']")
         jobs = []
-        for item in data.get("items", []):
-            employer = item.get("employer") or {}
-            area = item.get("area") or {}
-            tags = [r["name"] for r in item.get("professional_roles", [])]
+        for card in cards:
+            try:
+                title_el = card.query_selector("[data-qa='serp-item__title']")
+                if not title_el:
+                    continue
+                title = title_el.inner_text().strip()
+                href = title_el.get_attribute("href") or ""
+                job_url = href.split("?")[0]
+                job_id = "hh_" + hashlib.md5(job_url.encode()).hexdigest()[:12]
 
-            jobs.append(Job(
-                id=f"hh_{item['id']}",
-                source=self.SOURCE_NAME,
-                title=item.get("name", ""),
-                company=employer.get("name", "Не указана"),
-                url=item.get("alternate_url", ""),
-                salary=_salary_str(item.get("salary")),
-                location=area.get("name"),
-                tags=tags,
-            ))
+                company_el = card.query_selector("[data-qa='vacancy-serp__vacancy-employer']")
+                company = company_el.inner_text().strip() if company_el else "Не указана"
+
+                salary_el = card.query_selector("[data-qa='vacancy-serp__vacancy-compensation']")
+                salary = salary_el.inner_text().strip() if salary_el else None
+
+                location_el = card.query_selector("[data-qa='vacancy-serp__vacancy-address']")
+                location = location_el.inner_text().strip() if location_el else None
+
+                jobs.append(Job(
+                    id=job_id,
+                    source=self.SOURCE_NAME,
+                    title=title,
+                    company=company,
+                    url=job_url,
+                    salary=salary,
+                    location=location,
+                ))
+            except Exception as e:
+                logger.debug("hh.ru card parse error: %s", e)
         return jobs
