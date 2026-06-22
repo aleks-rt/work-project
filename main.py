@@ -1,22 +1,22 @@
 #!/usr/bin/env python3
 """
-Job Bot — собирает вакансии бизнес-аналитика с hh.ru, getmatch, habr.career,
-superjob и linkedin, отправляет новые в Telegram.
+Job Bot — собирает вакансии бизнес-аналитика и отправляет в Telegram.
 
 Запуск:
-    python main.py              # запуск с планировщиком
-    python main.py --once       # однократная проверка и выход
-    python main.py --stats      # показать статистику БД
+    python main.py          # основной режим (бот + планировщик)
+    python main.py --once   # однократная проверка вакансий
+    python main.py --stats  # статистика БД
 """
 
 import argparse
 import logging
 import sys
+import threading
 import time
 
 import schedule
 
-from bot import send_job_sync, send_text_sync
+from bot import send_job_sync, send_text_sync, run_bot
 from config import CHECK_INTERVAL_MINUTES, SEARCH_KEYWORDS, TELEGRAM_BOT_TOKEN, TELEGRAM_CHAT_ID
 from scrapers import ALL_SCRAPERS
 from storage import init_db, is_seen, mark_seen, get_stats
@@ -31,7 +31,6 @@ logging.basicConfig(
 )
 logger = logging.getLogger("main")
 
-
 BA_KEYWORDS = [
     "бизнес-аналитик", "бизнес аналитик", "business analyst", "бизнес-анализ",
 ]
@@ -43,7 +42,7 @@ def is_ba_job(title: str) -> bool:
 
 
 def check_jobs():
-    logger.info("Запуск проверки вакансий (ключевые слова: %s)", SEARCH_KEYWORDS)
+    logger.info("Запуск проверки вакансий")
     new_count = 0
 
     for ScraperClass in ALL_SCRAPERS:
@@ -59,21 +58,18 @@ def check_jobs():
                     send_job_sync(job)
                     new_count += 1
                     logger.info("  + Новая: [%s] %s @ %s", job.source, job.title, job.company)
-                    time.sleep(0.5)  # пауза между сообщениями
+                    time.sleep(0.5)
         except Exception as e:
             logger.error("Ошибка скрапера %s: %s", scraper.SOURCE_NAME, e)
 
     logger.info("Проверка завершена. Новых вакансий: %d", new_count)
-    if new_count == 0:
-        logger.info("Новых вакансий нет.")
 
 
 def show_stats():
     stats = get_stats()
-    lines = [f"📊 <b>Статистика бота</b>", f"Всего вакансий в БД: {stats['total']}"]
+    print(f"Всего вакансий в БД: {stats['total']}")
     for source, cnt in stats["by_source"].items():
-        lines.append(f"  • {source}: {cnt}")
-    print("\n".join(lines).replace("<b>", "").replace("</b>", ""))
+        print(f"  {source}: {cnt}")
 
 
 def validate_config():
@@ -83,15 +79,20 @@ def validate_config():
     if not TELEGRAM_CHAT_ID:
         logger.error("TELEGRAM_CHAT_ID не задан в .env")
         sys.exit(1)
-    if not SEARCH_KEYWORDS:
-        logger.error("SEARCH_KEYWORDS пуст")
-        sys.exit(1)
+
+
+def scheduler_thread():
+    check_jobs()
+    schedule.every(CHECK_INTERVAL_MINUTES).minutes.do(check_jobs)
+    while True:
+        schedule.run_pending()
+        time.sleep(30)
 
 
 def main():
-    parser = argparse.ArgumentParser(description="Job Bot — поиск вакансий BA")
+    parser = argparse.ArgumentParser()
     parser.add_argument("--once", action="store_true", help="Однократная проверка")
-    parser.add_argument("--stats", action="store_true", help="Показать статистику")
+    parser.add_argument("--stats", action="store_true", help="Статистика")
     args = parser.parse_args()
 
     if args.stats:
@@ -105,25 +106,14 @@ def main():
         check_jobs()
         return
 
-    logger.info(
-        "Бот запущен. Интервал проверки: %d мин. Ключевые слова: %s",
-        CHECK_INTERVAL_MINUTES,
-        SEARCH_KEYWORDS,
-    )
-    send_text_sync(
-        f"🤖 <b>Job Bot запущен</b>\n"
-        f"Ищу вакансии: {', '.join(SEARCH_KEYWORDS)}\n"
-        f"Интервал: каждые {CHECK_INTERVAL_MINUTES} мин."
-    )
+    logger.info("Бот запущен. Интервал: %d мин.", CHECK_INTERVAL_MINUTES)
 
-    # первая проверка сразу при старте
-    check_jobs()
+    # планировщик вакансий в отдельном потоке
+    t = threading.Thread(target=scheduler_thread, daemon=True)
+    t.start()
 
-    schedule.every(CHECK_INTERVAL_MINUTES).minutes.do(check_jobs)
-
-    while True:
-        schedule.run_pending()
-        time.sleep(30)
+    # основной поток — polling Telegram (обработка кнопок и команд)
+    run_bot()
 
 
 if __name__ == "__main__":

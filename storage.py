@@ -21,6 +21,12 @@ def init_db():
                 seen_at TEXT NOT NULL
             )
         """)
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS user_data (
+                key TEXT PRIMARY KEY,
+                value TEXT
+            )
+        """)
         conn.commit()
 
 
@@ -42,6 +48,31 @@ def mark_seen(job_id: str, source: str, title: str, company: str, url: str):
             (job_id, source, title, company, url, datetime.utcnow().isoformat()),
         )
         conn.commit()
+
+
+def get_job_url(job_id: str) -> str | None:
+    with get_conn() as conn:
+        row = conn.execute(
+            "SELECT url FROM seen_jobs WHERE id = ?", (job_id,)
+        ).fetchone()
+        return row["url"] if row else None
+
+
+def save_user_data(key: str, value: str):
+    with get_conn() as conn:
+        conn.execute(
+            "INSERT OR REPLACE INTO user_data (key, value) VALUES (?, ?)",
+            (key, value),
+        )
+        conn.commit()
+
+
+def get_user_data(key: str) -> str | None:
+    with get_conn() as conn:
+        row = conn.execute(
+            "SELECT value FROM user_data WHERE key = ?", (key,)
+        ).fetchone()
+        return row["value"] if row else None
 
 
 def get_stats() -> dict:
