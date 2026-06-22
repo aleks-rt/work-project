@@ -1,5 +1,5 @@
 import logging
-import asyncio
+import httpx
 from telegram import Bot
 from telegram.constants import ParseMode
 from telegram.error import TelegramError
@@ -8,45 +8,31 @@ from scrapers.base import Job
 
 logger = logging.getLogger(__name__)
 
-_bot: Bot | None = None
-
 
 def get_bot() -> Bot:
-    global _bot
-    if _bot is None:
-        _bot = Bot(token=TELEGRAM_BOT_TOKEN)
-    return _bot
-
-
-async def send_job(job: Job):
-    bot = get_bot()
-    text = job.format_message()
-    try:
-        await bot.send_message(
-            chat_id=TELEGRAM_CHAT_ID,
-            text=text,
-            parse_mode=ParseMode.HTML,
-            disable_web_page_preview=False,
-        )
-    except TelegramError as e:
-        logger.error("Telegram send error: %s", e)
-
-
-async def send_text(text: str):
-    bot = get_bot()
-    try:
-        await bot.send_message(
-            chat_id=TELEGRAM_CHAT_ID,
-            text=text,
-            parse_mode=ParseMode.HTML,
-        )
-    except TelegramError as e:
-        logger.error("Telegram send error: %s", e)
+    return Bot(token=TELEGRAM_BOT_TOKEN)
 
 
 def send_job_sync(job: Job):
-    asyncio.run(send_job(job))
+    _send(job.format_message())
 
 
 def send_text_sync(text: str):
-    asyncio.run(send_text(text))
+    _send(text)
+
+
+def _send(text: str):
+    try:
+        with httpx.Client() as client:
+            url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage"
+            resp = client.post(url, json={
+                "chat_id": TELEGRAM_CHAT_ID,
+                "text": text,
+                "parse_mode": "HTML",
+                "disable_web_page_preview": False,
+            }, timeout=15)
+            data = resp.json()
+            if not data.get("ok"):
+                logger.error("Telegram error: %s", data.get("description"))
+    except Exception as e:
+        logger.error("Telegram send error: %s", e)
