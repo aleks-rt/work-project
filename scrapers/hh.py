@@ -1,11 +1,21 @@
 import logging
+import time
 import requests
-from config import HEADERS, HH_AREA, MIN_SALARY, EXPERIENCE
+from config import EXPERIENCE, MIN_SALARY
 from .base import BaseScraper, Job
 
 logger = logging.getLogger(__name__)
 
 HH_API = "https://api.hh.ru/vacancies"
+
+# 113 = вся Россия, 1 = Москва, 2 = Санкт-Петербург
+HH_AREA = "113"
+
+HEADERS = {
+    "User-Agent": "JobBot/1.0 (job search bot; contact: user@example.com)",
+    "HH-User-Agent": "JobBot/1.0 (job search bot; contact: user@example.com)",
+    "Accept": "application/json",
+}
 
 
 def _salary_str(salary: dict | None) -> str | None:
@@ -27,27 +37,25 @@ class HHScraper(BaseScraper):
 
     def fetch(self, keywords: list[str]) -> list[Job]:
         jobs: list[Job] = []
+        seen: set[str] = set()
         for keyword in keywords:
             try:
-                jobs.extend(self._fetch_keyword(keyword))
+                for job in self._fetch_keyword(keyword):
+                    if job.id not in seen:
+                        seen.add(job.id)
+                        jobs.append(job)
+                time.sleep(0.5)
             except Exception as e:
                 logger.error("hh.ru error for '%s': %s", keyword, e)
-        # deduplicate by id within this fetch
-        seen = set()
-        unique = []
-        for j in jobs:
-            if j.id not in seen:
-                seen.add(j.id)
-                unique.append(j)
-        return unique
+        return jobs
 
     def _fetch_keyword(self, keyword: str) -> list[Job]:
         params = {
             "text": keyword,
+            "search_field": "name",
             "area": HH_AREA,
             "per_page": 50,
             "order_by": "publication_time",
-            "search_field": ["name", "description"],
         }
         if MIN_SALARY:
             params["salary"] = MIN_SALARY
@@ -63,20 +71,16 @@ class HHScraper(BaseScraper):
         for item in data.get("items", []):
             employer = item.get("employer") or {}
             area = item.get("area") or {}
-            snippet = item.get("snippet") or {}
-            tags = [s["name"] for s in item.get("professional_roles", [])]
+            tags = [r["name"] for r in item.get("professional_roles", [])]
 
-            jobs.append(
-                Job(
-                    id=f"hh_{item['id']}",
-                    source=self.SOURCE_NAME,
-                    title=item.get("name", ""),
-                    company=employer.get("name", "Не указана"),
-                    url=item.get("alternate_url", ""),
-                    salary=_salary_str(item.get("salary")),
-                    location=area.get("name"),
-                    experience=snippet.get("requirement", "")[:100] if snippet.get("requirement") else None,
-                    tags=tags,
-                )
-            )
+            jobs.append(Job(
+                id=f"hh_{item['id']}",
+                source=self.SOURCE_NAME,
+                title=item.get("name", ""),
+                company=employer.get("name", "Не указана"),
+                url=item.get("alternate_url", ""),
+                salary=_salary_str(item.get("salary")),
+                location=area.get("name"),
+                tags=tags,
+            ))
         return jobs
