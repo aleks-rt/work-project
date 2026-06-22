@@ -32,53 +32,46 @@ def init_db():
 
 def is_seen(job_id: str) -> bool:
     with get_conn() as conn:
-        row = conn.execute(
-            "SELECT 1 FROM seen_jobs WHERE id = ?", (job_id,)
-        ).fetchone()
+        row = conn.execute("SELECT 1 FROM seen_jobs WHERE id = ?", (job_id,)).fetchone()
         return row is not None
 
 
 def mark_seen(job_id: str, source: str, title: str, company: str, url: str):
     with get_conn() as conn:
         conn.execute(
-            """
-            INSERT OR IGNORE INTO seen_jobs (id, source, title, company, url, seen_at)
-            VALUES (?, ?, ?, ?, ?, ?)
-            """,
+            "INSERT OR IGNORE INTO seen_jobs (id, source, title, company, url, seen_at) VALUES (?, ?, ?, ?, ?, ?)",
             (job_id, source, title, company, url, datetime.utcnow().isoformat()),
         )
         conn.commit()
 
 
-def get_job_url(job_id: str) -> str | None:
+def get_job(job_id: str) -> dict | None:
     with get_conn() as conn:
         row = conn.execute(
-            "SELECT url FROM seen_jobs WHERE id = ?", (job_id,)
+            "SELECT id, source, title, company, url FROM seen_jobs WHERE id = ?", (job_id,)
         ).fetchone()
-        return row["url"] if row else None
+        return dict(row) if row else None
+
+
+def get_job_url(job_id: str) -> str | None:
+    job = get_job(job_id)
+    return job["url"] if job else None
 
 
 def save_user_data(key: str, value: str):
     with get_conn() as conn:
-        conn.execute(
-            "INSERT OR REPLACE INTO user_data (key, value) VALUES (?, ?)",
-            (key, value),
-        )
+        conn.execute("INSERT OR REPLACE INTO user_data (key, value) VALUES (?, ?)", (key, value))
         conn.commit()
 
 
 def get_user_data(key: str) -> str | None:
     with get_conn() as conn:
-        row = conn.execute(
-            "SELECT value FROM user_data WHERE key = ?", (key,)
-        ).fetchone()
+        row = conn.execute("SELECT value FROM user_data WHERE key = ?", (key,)).fetchone()
         return row["value"] if row else None
 
 
 def get_stats() -> dict:
     with get_conn() as conn:
         total = conn.execute("SELECT COUNT(*) FROM seen_jobs").fetchone()[0]
-        by_source = conn.execute(
-            "SELECT source, COUNT(*) as cnt FROM seen_jobs GROUP BY source"
-        ).fetchall()
+        by_source = conn.execute("SELECT source, COUNT(*) as cnt FROM seen_jobs GROUP BY source").fetchall()
         return {"total": total, "by_source": {r["source"]: r["cnt"] for r in by_source}}
