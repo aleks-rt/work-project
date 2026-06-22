@@ -22,20 +22,44 @@ class HHApplier(BaseApplier):
             )
             page = ctx.new_page()
             try:
-                # Логин
                 page.goto("https://hh.ru/account/login", timeout=30000, wait_until="domcontentloaded")
                 time.sleep(2)
 
-                # Вводим email (разные варианты селекторов)
-                for sel in ["input[name='login']", "input[type='email']", "input[placeholder*='email']", "input[placeholder*='Email']", "input[placeholder*='логин']"]:
+                # Выбираем "Я соискатель"
+                for sel in [
+                    "input[value='APPLICANT']",
+                    "label:has-text('Я соискатель')",
+                    "input[name='account-type'][value='applicant']",
+                ]:
+                    el = page.query_selector(sel)
+                    if el:
+                        el.click()
+                        time.sleep(1)
+                        break
+
+                # Нажимаем "Продолжить" или "Войти"
+                for sel in [
+                    "button[data-qa='account-login-submit']",
+                    "button[type='submit']",
+                    "button:has-text('Продолжить')",
+                    "button:has-text('Войти')",
+                ]:
+                    el = page.query_selector(sel)
+                    if el:
+                        el.click()
+                        time.sleep(2)
+                        break
+
+                # Вводим email
+                for sel in ["input[name='login']", "input[type='email']", "input[placeholder*='mail']"]:
                     el = page.query_selector(sel)
                     if el:
                         el.fill(self.email)
                         break
                 else:
-                    return ApplyResult(False, "Не найдено поле email на странице входа hh.ru")
+                    return ApplyResult(False, "Не найдено поле email на hh.ru")
 
-                # Кнопка "Войти с паролем"
+                # Нажимаем "Войти с паролем"
                 for sel in [
                     "button[data-qa='expand-login-by-password']",
                     "button:has-text('Войти с паролем')",
@@ -45,6 +69,14 @@ class HHApplier(BaseApplier):
                     if el:
                         el.click()
                         time.sleep(1)
+                        break
+
+                # Нажимаем "Продолжить" если есть
+                for sel in ["button[type='submit']", "button:has-text('Продолжить')"]:
+                    el = page.query_selector(sel)
+                    if el:
+                        el.click()
+                        time.sleep(2)
                         break
 
                 # Вводим пароль
@@ -60,7 +92,6 @@ class HHApplier(BaseApplier):
                 for sel in [
                     "button[data-qa='account-login-submit']",
                     "button[type='submit']",
-                    "input[type='submit']",
                 ]:
                     el = page.query_selector(sel)
                     if el:
