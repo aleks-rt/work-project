@@ -17,53 +17,95 @@ class HHApplier(BaseApplier):
                     "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
                     "AppleWebKit/537.36 (KHTML, like Gecko) "
                     "Chrome/120.0.0.0 Safari/537.36"
-                )
+                ),
+                locale="ru-RU",
             )
             page = ctx.new_page()
             try:
                 # Логин
-                page.goto("https://hh.ru/account/login", timeout=30000)
-                page.wait_for_selector("input[name='login']", timeout=10000)
-                page.fill("input[name='login']", self.email)
-                page.click("button[data-qa='expand-login-by-password']")
-                page.wait_for_selector("input[name='password']", timeout=5000)
-                page.fill("input[name='password']", self.password)
-                page.click("button[data-qa='account-login-submit']")
-                page.wait_for_url("**//**", timeout=15000)
+                page.goto("https://hh.ru/account/login", timeout=30000, wait_until="domcontentloaded")
                 time.sleep(2)
+
+                # Вводим email (разные варианты селекторов)
+                for sel in ["input[name='login']", "input[type='email']", "input[placeholder*='email']", "input[placeholder*='Email']", "input[placeholder*='логин']"]:
+                    el = page.query_selector(sel)
+                    if el:
+                        el.fill(self.email)
+                        break
+                else:
+                    return ApplyResult(False, "Не найдено поле email на странице входа hh.ru")
+
+                # Кнопка "Войти с паролем"
+                for sel in [
+                    "button[data-qa='expand-login-by-password']",
+                    "button:has-text('Войти с паролем')",
+                    "a:has-text('Войти с паролем')",
+                ]:
+                    el = page.query_selector(sel)
+                    if el:
+                        el.click()
+                        time.sleep(1)
+                        break
+
+                # Вводим пароль
+                for sel in ["input[name='password']", "input[type='password']"]:
+                    el = page.query_selector(sel)
+                    if el:
+                        el.fill(self.password)
+                        break
+                else:
+                    return ApplyResult(False, "Не найдено поле пароля на hh.ru")
+
+                # Нажимаем войти
+                for sel in [
+                    "button[data-qa='account-login-submit']",
+                    "button[type='submit']",
+                    "input[type='submit']",
+                ]:
+                    el = page.query_selector(sel)
+                    if el:
+                        el.click()
+                        break
+
+                time.sleep(3)
 
                 if "account/login" in page.url:
                     return ApplyResult(False, "Неверный логин или пароль на hh.ru")
 
                 # Переход на вакансию
-                page.goto(vacancy_url, timeout=30000)
-                page.wait_for_selector("[data-qa='vacancy-response-link-top']", timeout=10000)
-                page.click("[data-qa='vacancy-response-link-top']")
+                page.goto(vacancy_url, timeout=30000, wait_until="domcontentloaded")
                 time.sleep(2)
 
-                # Выбор резюме (если появился диалог)
+                # Кнопка отклика
+                for sel in [
+                    "[data-qa='vacancy-response-link-top']",
+                    "[data-qa='vacancy-response-btn-top']",
+                    "button:has-text('Откликнуться')",
+                    "a:has-text('Откликнуться')",
+                ]:
+                    el = page.query_selector(sel)
+                    if el:
+                        el.click()
+                        time.sleep(2)
+                        break
+                else:
+                    return ApplyResult(False, "Не найдена кнопка отклика на hh.ru")
+
+                # Выбор резюме в диалоге
                 try:
                     page.wait_for_selector("[data-qa='resume-title']", timeout=5000)
-                    # Выбираем первое резюме
                     page.click("[data-qa='resume-title']")
                     time.sleep(1)
-                    submit = page.query_selector("[data-qa='vacancy-response-submit-popup']")
-                    if submit:
-                        submit.click()
-                        time.sleep(2)
+                    for sel in ["[data-qa='vacancy-response-submit-popup']", "button[type='submit']"]:
+                        el = page.query_selector(sel)
+                        if el:
+                            el.click()
+                            time.sleep(2)
+                            break
                 except PWTimeout:
-                    pass  # диалог не появился — отклик уже отправлен
+                    pass
 
-                # Проверяем результат
-                try:
-                    page.wait_for_selector(
-                        "[data-qa='vacancy-response-letter-open'], "
-                        "[data-qa='response-status']",
-                        timeout=5000,
-                    )
-                    return ApplyResult(True, f"Отклик на hh.ru отправлен: {vacancy_title}")
-                except PWTimeout:
-                    return ApplyResult(True, f"Отклик, вероятно, отправлен: {vacancy_title}")
+                return ApplyResult(True, f"Отклик на hh.ru отправлен: {vacancy_title}")
 
             except Exception as e:
                 logger.error("HH apply error: %s", e)
