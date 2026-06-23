@@ -64,7 +64,7 @@ async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "Под каждой вакансией 4 кнопки:\n"
         "🔗 Открыть — перейти на сайт\n"
         "📨 Откликнуться — автоотклик\n"
-        "✉️ Написать письмо — ИИ напишет сопроводительное письмо\n"
+        "✉️ Написать письмо — ИИ напишет текст для отклика\n"
         "📊 Анализ резюме — ИИ сравнит резюме с вакансией"
     )
 
@@ -140,7 +140,7 @@ async def handle_letter(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not resume_path or not os.path.exists(resume_path):
         await query.message.reply_text("Сначала загрузи резюме через /resume")
         return
-    await query.message.reply_text("Пишу сопроводительное письмо...")
+    await query.message.reply_text("Пишу письмо...")
     chat_id = query.message.chat_id
 
     def do_letter():
@@ -149,7 +149,7 @@ async def handle_letter(update: Update, context: ContextTypes.DEFAULT_TYPE):
             resume_text = extract_resume_text(resume_path)
             vacancy_desc = fetch_vacancy_description(job["url"])
             letter = generate_cover_letter(job["title"], job["company"], vacancy_desc, resume_text)
-            _http_send({"chat_id": chat_id, "text": f"✉️ <b>Сопроводительное письмо</b>\n\n{letter}", "parse_mode": "HTML"})
+            _http_send({"chat_id": chat_id, "text": letter})
         except Exception as e:
             _http_send({"chat_id": chat_id, "text": f"Ошибка генерации письма: {e}"})
 
