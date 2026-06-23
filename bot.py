@@ -39,8 +39,6 @@ def _generate_and_send_letter(job: dict):
 def send_job_sync(job: Job):
     keyboard = [[
         {"text": "🔗 Открыть", "url": job.url},
-        {"text": "📨 Откликнуться", "callback_data": f"apply:{job.id}"},
-    ], [
         {"text": "📊 Анализ резюме", "callback_data": f"analyze:{job.id}"},
     ]]
     _http_send({
@@ -65,7 +63,6 @@ def build_app():
         _app.add_handler(CommandHandler("resume", cmd_resume))
         _app.add_handler(CommandHandler("stats", cmd_stats))
         _app.add_handler(MessageHandler(filters.Document.ALL, handle_resume_upload))
-        _app.add_handler(CallbackQueryHandler(handle_apply, pattern=r"^apply:"))
         _app.add_handler(CallbackQueryHandler(handle_analyze, pattern=r"^analyze:"))
     return _app
 
@@ -75,9 +72,8 @@ async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "Привет! Я слежу за вакансиями бизнес-аналитика.\n\n"
         "Загрузи резюме: /resume\n"
         "Статистика: /stats\n\n"
-        "Под каждой вакансией 3 кнопки:\n"
+        "Под каждой вакансией 2 кнопки:\n"
         "🔗 Открыть — перейти на сайт\n"
-        "📨 Откликнуться — автоотклик\n"
         "📊 Анализ резюме — ИИ сравнит резюме с вакансией\n\n"
         "Письмо для отклика генерируется автоматически под каждую вакансию."
     )
@@ -106,40 +102,6 @@ async def handle_resume_upload(update: Update, context: ContextTypes.DEFAULT_TYP
     await file.download_to_drive(local_path)
     save_user_data("resume_local_path", local_path)
     await update.message.reply_text(f"Резюме «{doc.file_name}» сохранено!")
-
-
-async def handle_apply(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    query = update.callback_query
-    await query.answer()
-    job_id = query.data.replace("apply:", "")
-    job = get_job(job_id)
-    if not job:
-        await query.message.reply_text("Вакансия не найдена.")
-        return
-    resume_path = get_user_data("resume_local_path")
-    if not resume_path or not os.path.exists(resume_path):
-        await query.message.reply_text("Сначала загрузи резюме через /resume")
-        return
-    await query.message.reply_text(f"Отправлю отклик: {job['title']} — {job['company']}")
-    chat_id = query.message.chat_id
-
-    def do_apply():
-        from applier import auto_apply
-        result = auto_apply(job["source"], job["url"], job["title"], resume_path)
-        resume_file_id = get_user_data("resume_file_id")
-        if result.success:
-            _http_send({"chat_id": chat_id, "text": f"Отклик отправлен: {job['title']}"})
-        else:
-            _http_send({"chat_id": chat_id, "text": f"Не удалось: {result.message}\n{job['url']}"})
-            if resume_file_id:
-                with httpx.Client(timeout=15) as client:
-                    client.post(
-                        f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendDocument",
-                        json={"chat_id": chat_id, "document": resume_file_id,
-                              "caption": f"Резюме для: {job['title']}"},
-                    )
-
-    threading.Thread(target=do_apply, daemon=True).start()
 
 
 async def handle_analyze(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -171,15 +133,10 @@ async def handle_analyze(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 
 def make_keyboard(job: Job) -> InlineKeyboardMarkup:
-    return InlineKeyboardMarkup([
-        [
-            InlineKeyboardButton("🔗 Открыть", url=job.url),
-            InlineKeyboardButton("📨 Откликнуться", callback_data=f"apply:{job.id}"),
-        ],
-        [
-            InlineKeyboardButton("📊 Анализ резюме", callback_data=f"analyze:{job.id}"),
-        ],
-    ])
+    return InlineKeyboardMarkup([[
+        InlineKeyboardButton("🔗 Открыть", url=job.url),
+        InlineKeyboardButton("📊 Анализ резюме", callback_data=f"analyze:{job.id}"),
+    ]])
 
 
 def run_bot():
