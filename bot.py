@@ -22,12 +22,25 @@ def _http_send(payload: dict):
             logger.error("Telegram error: %s", r.json().get("description"))
 
 
+def _generate_and_send_letter(job: dict):
+    resume_path = get_user_data("resume_local_path")
+    if not resume_path or not os.path.exists(resume_path):
+        return
+    try:
+        from ai_helper import generate_cover_letter, extract_resume_text, fetch_vacancy_description
+        resume_text = extract_resume_text(resume_path)
+        vacancy_desc = fetch_vacancy_description(job["url"])
+        letter = generate_cover_letter(job["title"], job["company"], vacancy_desc, resume_text)
+        _http_send({"chat_id": TELEGRAM_CHAT_ID, "text": letter})
+    except Exception as e:
+        logger.error("Ошибка генерации письма: %s", e)
+
+
 def send_job_sync(job: Job):
     keyboard = [[
         {"text": "🔗 Открыть", "url": job.url},
         {"text": "📨 Откликнуться", "callback_data": f"apply:{job.id}"},
     ], [
-        {"text": "✉️ Написать письмо", "callback_data": f"letter:{job.id}"},
         {"text": "📊 Анализ резюме", "callback_data": f"analyze:{job.id}"},
     ]]
     _http_send({
@@ -36,6 +49,8 @@ def send_job_sync(job: Job):
         "parse_mode": "HTML",
         "reply_markup": {"inline_keyboard": keyboard},
     })
+    job_dict = {"title": job.title, "company": job.company, "url": job.url}
+    threading.Thread(target=_generate_and_send_letter, args=(job_dict,), daemon=True).start()
 
 
 def send_text_sync(text: str):
@@ -51,7 +66,6 @@ def build_app():
         _app.add_handler(CommandHandler("stats", cmd_stats))
         _app.add_handler(MessageHandler(filters.Document.ALL, handle_resume_upload))
         _app.add_handler(CallbackQueryHandler(handle_apply, pattern=r"^apply:"))
-        _app.add_handler(CallbackQueryHandler(handle_letter, pattern=r"^letter:"))
         _app.add_handler(CallbackQueryHandler(handle_analyze, pattern=r"^analyze:"))
     return _app
 
@@ -61,11 +75,11 @@ async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "Привет! Я слежу за вакансиями бизнес-аналитика.\n\n"
         "Загрузи резюме: /resume\n"
         "Статистика: /stats\n\n"
-        "Под каждой вакансией 4 кнопки:\n"
+        "Под каждой вакансией 3 кнопки:\n"
         "🔗 Открыть — перейти на сайт\n"
         "📨 Откликнуться — автоотклик\n"
-        "✉️ Написать письмо — ИИ напишет текст для отклика\n"
-        "📊 Анализ резюме — ИИ сравнит резюме с вакансией"
+        "📊 Анализ резюме — ИИ сравнит резюме с вакансией\n\n"
+        "Письмо для отклика генерируется автоматически под каждую вакансию."
     )
 
 
@@ -106,7 +120,7 @@ async def handle_apply(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not resume_path or not os.path.exists(resume_path):
         await query.message.reply_text("Сначала загрузи резюме через /resume")
         return
-    await query.message.reply_text(f"Отправляю отклик: {job['title']} — {job['company']}")
+    await query.message.reply_text(f"Отправлю отклик: {job['title']} — {job['company']}")
     chat_id = query.message.chat_id
 
     def do_apply():
@@ -126,34 +140,6 @@ async def handle_apply(update: Update, context: ContextTypes.DEFAULT_TYPE):
                     )
 
     threading.Thread(target=do_apply, daemon=True).start()
-
-
-async def handle_letter(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    query = update.callback_query
-    await query.answer()
-    job_id = query.data.replace("letter:", "")
-    job = get_job(job_id)
-    if not job:
-        await query.message.reply_text("Вакансия не найдена.")
-        return
-    resume_path = get_user_data("resume_local_path")
-    if not resume_path or not os.path.exists(resume_path):
-        await query.message.reply_text("Сначала загрузи резюме через /resume")
-        return
-    await query.message.reply_text("Пишу письмо...")
-    chat_id = query.message.chat_id
-
-    def do_letter():
-        try:
-            from ai_helper import generate_cover_letter, extract_resume_text, fetch_vacancy_description
-            resume_text = extract_resume_text(resume_path)
-            vacancy_desc = fetch_vacancy_description(job["url"])
-            letter = generate_cover_letter(job["title"], job["company"], vacancy_desc, resume_text)
-            _http_send({"chat_id": chat_id, "text": letter})
-        except Exception as e:
-            _http_send({"chat_id": chat_id, "text": f"Ошибка генерации письма: {e}"})
-
-    threading.Thread(target=do_letter, daemon=True).start()
 
 
 async def handle_analyze(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -191,7 +177,6 @@ def make_keyboard(job: Job) -> InlineKeyboardMarkup:
             InlineKeyboardButton("📨 Откликнуться", callback_data=f"apply:{job.id}"),
         ],
         [
-            InlineKeyboardButton("✉️ Написать письмо", callback_data=f"letter:{job.id}"),
             InlineKeyboardButton("📊 Анализ резюме", callback_data=f"analyze:{job.id}"),
         ],
     ])
