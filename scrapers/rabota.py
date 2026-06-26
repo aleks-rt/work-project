@@ -7,11 +7,11 @@ from .base import BaseScraper, Job
 
 logger = logging.getLogger(__name__)
 
-BASE_URL = "https://www.superjob.ru"
+BASE_URL = "https://rabota.ru"
 
 
-class SuperjobScraper(BaseScraper):
-    SOURCE_NAME = "superjob.ru"
+class RabotaScraper(BaseScraper):
+    SOURCE_NAME = "rabota.ru"
 
     def fetch(self, keywords: list[str]) -> list[Job]:
         jobs: list[Job] = []
@@ -23,52 +23,47 @@ class SuperjobScraper(BaseScraper):
                         seen_ids.add(j.id)
                         jobs.append(j)
             except Exception as e:
-                logger.error("superjob error for '%s': %s", keyword, e)
+                logger.error("rabota.ru error for '%s': %s", keyword, e)
         return jobs
 
     def _fetch_keyword(self, keyword: str) -> list[Job]:
-        url = f"{BASE_URL}/vacancy/search/"
-        params = {"keywords": keyword, "noGeo": 1, "order_field": "date"}
+        url = f"{BASE_URL}/vacancy/list/"
+        params = {"query": keyword, "sort": "date"}
         headers = {
             **HEADERS,
             "Accept": "text/html,application/xhtml+xml",
             "Accept-Language": "ru-RU,ru;q=0.9",
-            "Referer": "https://www.superjob.ru/",
         }
         resp = requests.get(url, params=params, headers=headers, timeout=15)
         resp.raise_for_status()
 
         soup = BeautifulSoup(resp.text, "lxml")
         jobs = []
-        seen_hrefs: set[str] = set()
 
-        for link in soup.select("a[href*='/vakansii/']"):
-            href = link.get("href", "")
-            if not href or href in seen_hrefs:
-                continue
-            # фильтр: только ссылки на конкретные вакансии (цифры в конце)
-            slug = href.rstrip("/").split("/")[-1]
-            if not slug or not slug[0].isdigit() and not any(c.isdigit() for c in slug):
+        cards = soup.select("a[href*='/vacancy/']") or soup.select("[data-test='vacancy-title']")
+        seen_hrefs: set[str] = set()
+        for el in cards:
+            href = el.get("href", "")
+            if not href or href in seen_hrefs or "/vacancy/" not in href:
                 continue
             seen_hrefs.add(href)
 
             full_url = BASE_URL + href if href.startswith("/") else href
-            job_id = "sj_" + hashlib.md5(href.encode()).hexdigest()[:12]
+            job_id = "rb_" + hashlib.md5(href.encode()).hexdigest()[:12]
 
-            title = link.get_text(strip=True)[:120]
+            title = el.get_text(strip=True)[:120]
             if not title or len(title) < 5:
                 continue
 
-            container = link.find_parent("div", recursive=True)
+            container = el.find_parent("article") or el.find_parent("div")
             company, salary = "Не указана", None
-            # ищем компанию в соседних элементах
-            parent = link.parent
-            if parent:
-                for sibling in parent.find_next_siblings()[:3]:
-                    text = sibling.get_text(strip=True)
-                    if text and len(text) > 3:
-                        company = text[:80]
-                        break
+            if container:
+                company_el = container.select_one("[data-test='company-name'], [class*='company']")
+                if company_el:
+                    company = company_el.get_text(strip=True)
+                salary_el = container.select_one("[data-test='salary'], [class*='salary']")
+                if salary_el:
+                    salary = salary_el.get_text(strip=True)
 
             jobs.append(Job(
                 id=job_id,

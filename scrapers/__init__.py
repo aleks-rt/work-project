@@ -5,6 +5,8 @@ from .getmatch import GetMatchScraper
 from .habr import HabrCareerScraper
 from .superjob import SuperjobScraper
 from .linkedin import LinkedInScraper
+from .trudvsem import TrudvsemScraper
+from .rabota import RabotaScraper
 
 load_dotenv("credentials.env")
 
@@ -14,6 +16,8 @@ _ALL = [
     ("SITE_GETMATCH", GetMatchScraper),
     ("SITE_SUPERJOB", SuperjobScraper),
     ("SITE_LINKEDIN", LinkedInScraper),
+    ("SITE_TRUDVSEM", TrudvsemScraper),
+    ("SITE_RABOTA", RabotaScraper),
 ]
 
 ALL_SCRAPERS = [
