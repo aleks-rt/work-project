@@ -48,7 +48,7 @@ def send_job_sync(job: Job):
         "reply_markup": {"inline_keyboard": keyboard},
     })
     job_dict = {"title": job.title, "company": job.company, "url": job.url}
-    threading.Thread(target=_generate_and_send_letter, args=(job_dict,), daemon=True).start()
+    _generate_and_send_letter(job_dict)
 
 
 def send_text_sync(text: str):
